@@ -10,7 +10,7 @@ import threading
 import re
 
 # Configure Google Gemini with safety settings
-genai.configure(api_key="AIzaSyAqQmCCTCPu6i-ObyiXbdxR74VO4_nfqXk")
+genai.configure(api_key="Your API Key Here")
 
 # Configure the model with safety settings
 generation_config = {
