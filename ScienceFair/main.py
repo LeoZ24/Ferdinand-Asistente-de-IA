@@ -14,7 +14,7 @@ from time import sleep
 # --- CONFIGURACIÓN DE IA ---
 try:
 
-    genai.configure(api_key="AIzaSyAqQmCCTCPu6i-ObyiXbdxR74VO4_nfqXk") 
+    genai.configure(api_key="Your API Key here") 
 except Exception as e:
     print(f"Error configurando la API de Gemini: {e}")
     print("Asegúrate de haber reemplazado 'TU_API_KEY' con tu clave real.")
