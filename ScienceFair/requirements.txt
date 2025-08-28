@@ -1,0 +1,7 @@
+speechrecognition
+pynput
+google-generativeai
+gTTS
+pygame
+pillow
+requests
