@@ -16,7 +16,7 @@ from pynput import keyboard as pynput_keyboard
 # --- CONFIGURACIÓN DE IA ---
 try:
     
-    genai.configure(api_key="AIzaSyAqQmCCTCPu6i-ObyiXbdxR74VO4_nfqXk")
+    genai.configure(api_key="Your API key here")
 except Exception as e:
     print(f"Error configurando la API de Gemini: {e}")
     sys.exit(1)
