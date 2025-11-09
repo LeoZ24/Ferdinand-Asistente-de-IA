@@ -18,7 +18,7 @@ import time
 
 # --- CONFIGURACIÓN DE IA ---
 try:
-    genai.configure(api_key="AIzaSyAqQmCCTCPu6i-ObyiXbdxR74VO4_nfqXk")
+    genai.configure(api_key="YOUR API HERE")
 except Exception as e:
     print(f"Error configurando la API de Gemini: {e}")
     sys.exit(1)
