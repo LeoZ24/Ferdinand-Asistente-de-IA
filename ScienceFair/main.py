@@ -4,6 +4,7 @@ import sys
 import speech_recognition as sr
 import re
 import google.generativeai as genai
+from duckduckgo_search import DDGS
 from gtts import gTTS
 import pygame
 import tempfile
@@ -12,22 +13,43 @@ import multiprocessing
 from time import sleep
 import threading
 from pynput import keyboard as pynput_keyboard
+import serial
+import time
 
 # --- CONFIGURACIÓN DE IA ---
 try:
-    
-    genai.configure(api_key="Your API key here")
+    genai.configure(api_key="AIzaSyAqQmCCTCPu6i-ObyiXbdxR74VO4_nfqXk")
 except Exception as e:
     print(f"Error configurando la API de Gemini: {e}")
     sys.exit(1)
 
 
+# --- CONEXIÓN CON micro:bit (opcional) ---
+try:
+    # --- IMPORTANTE: '/dev/tty.usbmodem11402' cambiar por el puerto en caso de que se cambie ---
+    microbit_port = '/dev/tty.usbmodem11402'
+    microbit = serial.Serial(microbit_port, 115200, timeout=1)
+    print(f"Conexión con micro:bit en {microbit_port} exitosa.")
+    time.sleep(2) # esperar un poco para estabilizar la conexión
+except serial.SerialException:
+    print(f"Error: No se pudo conectar con la micro:bit en el puerto {microbit_port}.")
+    print("El programa continuará sin enviar comandos al robot.")
+    microbit = None
+
+# --- CONFIGURACIÓN DE MENSAJES A micro:bit ---
+# Si quieres que la micro:bit reciba las palabras completas ("hablando"/"fin")
+# cambia SEND_VERBOSE_STRINGS a True. Por defecto enviamos códigos cortos
+# para evitar que aparezcan textos largos en la pantalla de la micro:bit.
+SEND_VERBOSE_STRINGS = False
+MICROBIT_MSG_TALK_START = b'h\n' if not SEND_VERBOSE_STRINGS else b'hablando\n'
+MICROBIT_MSG_TALK_END = b'f\n' if not SEND_VERBOSE_STRINGS else b'fin\n'
+
+
 # --- PROMPT PARA LA IA (INSTRUCCIONES INICIALES) ---
 SYSTEM_PROMPT = """
-Eres Fer, un asistente de voz servicial. Tu tarea principal es analizar la petición del usuario y determinar si corresponde a uno de los siguientes comandos, utilizando el historial de la conversación como contexto si es necesario.
-Si la petición coincide con un comando, debes responder ÚNICA Y EXCLUSIVAMENTE con la clave del comando correspondiente (ej. 'CMD_DINO').
-Si la petición del usuario no es un comando de la lista, sino una pregunta o una conversación general (como 'qué te dije antes' o 'cuál es la capital de Francia'), responde de forma natural y amigable basándote en el historial.
+Eres Fer, un asistente de voz servicial. Tu tarea principal es analizar la petición del usuario y:
 
+1. Si la petición coincide con uno de los siguientes comandos, responde ÚNICA Y EXCLUSIVAMENTE con la clave del comando:
 - Abrir el juego Piedra, Papel o Tijera: CMD_RPS
 - Abrir el detector de lenguaje de señas: CMD_SEÑAS
 - Abrir el juego Pong: CMD_PONG
@@ -36,29 +58,39 @@ Si la petición del usuario no es un comando de la lista, sino una pregunta o un
 - Cerrar la aplicación o juego que está abierto actualmente: CMD_CERRAR
 - Terminar el programa por completo y cerrar todo: CMD_TERMINAR
 - Abrir el controlador del cuello (seguir dedo): CMD_NECK
+- Abrir el programa Language Teacher: CMD_LENGUAJE
+
+2. Si la petición NO es un comando, actúa como un asistente IA completo:
+- Responde cualquier pregunta de conocimiento general como lo haría Google
+- Usa el historial de la conversación como contexto
+- Da respuestas informativas y precisas
+- Mantén las respuestas concisas (MAXIMO 70 palabras)
+- Sé amigable y conversacional
+- NO utilizes caracteres especiales ni emojis en tus respuestas como asteriscos, guiones, etc, usa asteriscos solo para referirte a una multiplicacion.
 
 --- Ejemplos de Interacción ---
-- Usuario: "juguemos piedra, papel o tijera" -> Tu respuesta: CMD_RPS
-- Usuario: "quiero probar el juego del dinosaurio" -> Tu respuesta: CMD_DINO
-- Usuario: "cierra lo que está abierto porfa" -> Tu respuesta: CMD_CERRAR
-- Usuario: "cuál es la capital de Costa Rica" -> Tu respuesta: La capital de Costa Rica es San José.
-- Usuario (después de pedir el dino): "¿qué te acabo de pedir?" -> Tu respuesta: Me pediste que abriera el juego del dinosaurio.
-- Usuario: "apaga todo" -> Tu respuesta: CMD_TERMINAR
-- Usuario: "haz que te siga mi dedo" -> Tu respuesta: CMD_NECK
+Comandos:
+- Usuario: "juguemos piedra, papel o tijera" -> CMD_RPS
+- Usuario: "cierra lo que está abierto" -> CMD_CERRAR
+
+Preguntas generales:
+- Usuario: "cuál es la capital de Francia" -> "París es la capital de Francia. Es conocida como la Ciudad de la Luz y es famosa por la Torre Eiffel."
+- Usuario: "explícame qué es la fotosíntesis" -> [Explicación concisa del proceso]
+- Usuario: "¿cuándo fue la Segunda Guerra Mundial?" -> [Datos históricos relevantes]
 
 --- Instrucciones Adicionales ---
--Tambien si el usuario te pregunta porque te llamas Fer o Ferdinand, responde que es porque Recibiste ese nombre en homenaje a Ferdinand de Saussure, un lingüista suizo que fundó la lingüística moderna y la semiótica. Él propuso el concepto de significante y significado como los dos componentes principales del signo lingüístico.
--SIEMPRE responde con una respuesta corta, que no supere las 70 palabras.
-
-Ahora, espera la primera petición del usuario.
+- Si preguntan por tu nombre: Explica que te llamas Fer/Ferdinand en honor a Ferdinand de Saussure, fundador de la lingüística moderna.
+- Si preguntan por tu creador: Menciona que fuiste creado por Leo Zannoni, desarrollador y estudiante.
+- Usa el historial de la conversación para dar contexto a tus respuestas.
+- NO utilizes caracteres especiales ni emojis en tus respuestas como asteriscos, guiones, etc, usa asteriscos solo para referirte a una multiplicacion.
 """
 
 # --- CONFIGURACIÓN DEL MODELO DE IA ---
 generation_config = {
     "temperature": 0.5,
-    "top_p": 0.8,
+    "top_p": 0.85,
     "top_k": 20,
-    "max_output_tokens": 64,
+    "max_output_tokens": 124,
     "candidate_count": 1
 }
 safety_settings = [
@@ -277,6 +309,12 @@ def run_neck():
     global current_process
     current_process = subprocess.Popen(['python3', os.path.join("Others", "Neck.py")])
 
+def run_lenguage_teacher():
+    """Lanza el script Others/LenguageTeacher.py"""
+    terminate_current_process()
+    global current_process
+    current_process = subprocess.Popen(['python3', os.path.join("Others", "LenguageTeacher.py")])
+
 def terminate_main_program(gui_queue):
     terminate_current_process()
     if gui_queue:
@@ -291,6 +329,7 @@ COMMAND_MAP = {
     "CMD_FLAPPY": {"func": run_flappy_bird, "name": "Flappy Bird"},
     "CMD_DINO": {"func": run_dino, "name": "el juego del Dinosaurio"},
     "CMD_NECK": {"func": run_neck, "name": "el controlador del cuello"},
+    "CMD_LENGUAJE": {"func": run_lenguage_teacher, "name": "el programa Language Teacher"},
     "CMD_CERRAR": {"func": terminate_current_process, "name": "el proceso actual"},
     "CMD_TERMINAR": {"func": lambda: terminate_main_program(gui_queue), "name": "el programa por completo"}
 }
@@ -305,6 +344,44 @@ def process_command_with_ai(text):
         response = chat_session.send_message(text)
         ai_response = response.text.strip()
         print(f"✅ Respuesta de IA: '{ai_response}'")
+
+        # Si la IA indica desconocimiento, intentar buscar en la web y reintentar
+        ai_lower = ai_response.lower()
+        unknown_indicators = [
+            "no lo sé", "no sé", "desconozco", "no tengo información", "no puedo ayudar con eso",
+            "no puedo", "no puedo ayudar", "sin información",
+        ]
+
+        def looks_like_unknown(s: str) -> bool:
+            s = s.lower()
+            for ph in unknown_indicators:
+                if ph in s:
+                    return True
+            # Frases demasiado cortas que suelen indicar fallback
+            if len(s.split()) <= 3 and ("lo siento" in s or "no" in s):
+                return True
+            return False
+
+        if looks_like_unknown(ai_response):
+            try:
+                print("🔎 IA no tenía la respuesta; realizando búsqueda web...")
+                web_summary = web_search(text)
+                if web_summary:
+                    followup_prompt = (
+                        "El usuario preguntó: '" + text + "'. La respuesta previa de la IA fue insuficiente. "
+                        "Estos son resultados web relevantes:\n" + web_summary + "\n\n" 
+                        "Usa esos datos para dar una respuesta clara y concisa (máx 70 palabras)."
+                    )
+                    followup_resp = chat_session.send_message(followup_prompt)
+                    final = followup_resp.text.strip()
+                    print(f"✅ Respuesta final (con web): '{final}'")
+                    return final
+                else:
+                    print("⚠️ No se obtuvieron resultados web relevantes; devolviendo respuesta de IA original.")
+                    return ai_response
+            except Exception as e:
+                print(f"❌ Error al buscar en la web o al combinar resultados: {e}")
+                return ai_response
         return ai_response
     except Exception as e:
         print(f"❌ Error al procesar con IA: {e}")
@@ -324,7 +401,15 @@ def speak_response(text, gui_queue):
         except Exception as e:
             print(f"No se pudo reproducir el sonido de activación: {e}")
 
+        # Indicar a la GUI que la respuesta va a comenzar
         gui_queue.put({"action": "show_response_start", "text": text})
+        # Enviar señal a la micro:bit indicando que la IA está hablando (si está disponible)
+        if 'microbit' in globals() and microbit:
+            try:
+                microbit.write(MICROBIT_MSG_TALK_START)
+            except Exception as e:
+                print(f"Error enviando señal de inicio de habla a micro:bit: {e}")
+
         print(f"🔊 Reproduciendo: '{text}'")
         tts = gTTS(text=text, lang='es')
         with tempfile.NamedTemporaryFile(delete=True, suffix='.mp3') as fp:
@@ -333,10 +418,50 @@ def speak_response(text, gui_queue):
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
                 pygame.time.Clock().tick(10)
+
+        # Pequeña pausa final
         sleep(1)
+
+        # Avisar a la micro:bit que la IA terminó de hablar
+        if 'microbit' in globals() and microbit:
+            try:
+                microbit.write(MICROBIT_MSG_TALK_END)
+            except Exception as e:
+                print(f"Error enviando señal de fin de habla a micro:bit: {e}")
+
         gui_queue.put({"action": "hide"})
     except Exception as e:
         print(f"❌ Error al reproducir audio: {e}")
+
+
+def web_search(query, max_results=5):
+    """Realiza una búsqueda simple usando DuckDuckGo y devuelve un resumen breve de los resultados.
+
+    Devuelve un string corto concatenando títulos y snippets. Si no hay resultados, devuelve cadena vacía.
+    """
+    try:
+        print(f"🔎 Buscando en la web: '{query}' (max {max_results})")
+        with DDGS() as ddgs:
+            results = ddgs.text(query, max_results=max_results)
+        if not results:
+            return ""
+
+        parts = []
+        for r in results[:max_results]:
+            title = r.get('title', '') or ''
+            body = r.get('body', '') or ''
+            href = r.get('href', '') or ''
+            snippet = f"- {title}: {body} ({href})"
+            parts.append(snippet)
+
+        summary = "\n".join(parts)
+        # Limitar tamaño para no pasar demasiado texto al modelo
+        if len(summary) > 2000:
+            summary = summary[:2000] + "..."
+        return summary
+    except Exception as e:
+        print(f"❌ Error en web_search: {e}")
+        return ""
 
 def execute_with_confirmation(command_info, gui_queue):
     command_function = command_info["func"]
@@ -399,6 +524,17 @@ def listen_for_commands(gui_queue):
             else:
                 # Modo manos libres: procesar todo lo que se diga.
                 user_request = recognized_text.strip()
+
+            # Reproducir sonido de activación antes de procesar el comando
+            try:
+                activation_sound_path = os.path.join("Assets_Main", "ferdinandactivationsfx.mp3")
+                if os.path.exists(activation_sound_path):
+                    activation_sound = pygame.mixer.Sound(activation_sound_path)
+                    activation_sound.play()
+                    while pygame.mixer.get_busy():
+                        pygame.time.Clock().tick(10)
+            except Exception as e:
+                print(f"No se pudo reproducir el sonido de activación inicial: {e}")
 
             # El resto del flujo continúa normalmente
             gui_queue.put({"action": "show_listening", "text": "Escuchando..."})
@@ -532,3 +668,10 @@ if __name__ == "__main__":
             gui_process.join(timeout=2)
             if gui_process.is_alive():
                 gui_process.terminate()
+        # Cerrar conexión con micro:bit si está abierta
+        try:
+            if 'microbit' in globals() and microbit:
+                microbit.close()
+                print("Conexión con micro:bit cerrada.")
+        except Exception:
+            pass

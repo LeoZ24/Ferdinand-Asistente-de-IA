@@ -1,4 +1,5 @@
 import pygame
+import sys
 import os
 import random
 import cv2
@@ -57,6 +58,91 @@ mp_draw = mp.solutions.drawing_utils
 
 # Inicializamos la cámara (única para el juego)
 cap = cv2.VideoCapture(0)
+
+def detect_thumbs_up(hand_landmarks):
+    """Detecta si la mano está haciendo un gesto de pulgar arriba"""
+    if not hand_landmarks:
+        return False
+    thumb_tip = hand_landmarks.landmark[4]
+    thumb_mcp = hand_landmarks.landmark[2]
+    index_tip = hand_landmarks.landmark[8]
+    middle_tip = hand_landmarks.landmark[12]
+    ring_tip = hand_landmarks.landmark[16]
+    pinky_tip = hand_landmarks.landmark[20]
+    thumbs_up = (thumb_tip.y < thumb_mcp.y and
+                 all(f.y > thumb_mcp.y for f in [index_tip, middle_tip, ring_tip, pinky_tip]))
+    return thumbs_up
+
+def draw_rounded_rect(surface, color, rect, radius):
+    pygame.draw.rect(surface, color, rect, border_radius=radius)
+
+def show_instructions():
+    """Muestra la mini-UI de instrucciones y espera pulgar arriba para comenzar"""
+    instructions = [
+        ("\u00a1Bienvenido a Dinosaur!", 40, (255, 255, 255)),
+        ("Controla al dinosaurio con tu mano", 28, (200, 200, 200)),
+        ("", 20, (255, 255, 255)),
+        ("C\u00f3mo jugar:", 32, (255, 255, 255)),
+        ("\u2022 Coloca el dedo \u00edndice por encima de la l\u00ednea verde para saltar", 24, (200, 200, 200)),
+        ("\u2022 Coloca el dedo \u00edndice por debajo de la l\u00ednea roja para agacharte", 24, (200, 200, 200)),
+        ("", 20, (255, 255, 255)),
+        ("Haz un pulgar arriba para comenzar", 32, (98, 212, 155))
+    ]
+
+    waiting = True
+    popup_alpha = 0
+    clock_local = pygame.time.Clock()
+    while waiting:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        frame = cv2.flip(frame, 1)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands_detector.process(frame_rgb)
+
+        frame_rgb = cv2.resize(frame_rgb, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        cam_surface = pygame.surfarray.make_surface(np.rot90(frame_rgb))
+        cam_surface = pygame.transform.flip(cam_surface, True, False)
+
+        SCREEN.fill((255, 255, 255))
+        SCREEN.blit(cam_surface, (0, 0))
+
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 140))
+        SCREEN.blit(overlay, (0, 0))
+
+        if popup_alpha < 230:
+            popup_alpha += 8
+
+        popup_w, popup_h = 800, 360
+        popup_x = (SCREEN_WIDTH - popup_w) // 2
+        popup_y = (SCREEN_HEIGHT - popup_h) // 2
+        popup = pygame.Surface((popup_w, popup_h), pygame.SRCALPHA)
+        draw_rounded_rect(popup, (30, 30, 40, min(240, popup_alpha)), pygame.Rect(0, 0, popup_w, popup_h), 20)
+
+        y_off = 30
+        for text, size, color in instructions:
+            font = pygame.font.Font(None, size)
+            s = font.render(text, True, (*color, min(255, popup_alpha)))
+            r = s.get_rect(center=(popup_w//2, y_off))
+            popup.blit(s, r)
+            y_off += size + 8
+
+        SCREEN.blit(popup, (popup_x, popup_y))
+
+        if results.multi_hand_landmarks:
+            if detect_thumbs_up(results.multi_hand_landmarks[0]):
+                pygame.display.flip()
+                pygame.time.wait(400)
+                waiting = False
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+
+        pygame.display.flip()
+        clock_local.tick(30)
+
 
 class Dinosaur:
     X_POS = 80
@@ -342,4 +428,9 @@ def main():
             run_game = False
 
 while True:
+    # Mostrar instrucciones antes de iniciar la partida
+    try:
+        show_instructions()
+    except Exception:
+        pass
     main()

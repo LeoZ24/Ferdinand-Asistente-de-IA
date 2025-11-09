@@ -237,6 +237,7 @@ lbl_camera = tk.Label(window, bd=2, relief="solid")
 lbl_camera.place(relx=1, x=-10, y=10, anchor='ne')
 
 # Iniciar actualizaciones: se separa el procesamiento de vídeo (en el thread)
+
 window.after(50, update_hand_and_camera)
 window.after(250, move_bird)
 window.after(500, move_pipe)

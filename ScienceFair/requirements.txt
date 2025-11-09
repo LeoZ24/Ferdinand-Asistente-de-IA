@@ -1,7 +1,13 @@
-speechrecognition
-pynput
-google-generativeai
-gTTS
+opencv-python
+mediapipe
+numpy
 pygame
 pillow
 requests
+google-generativeai
+gTTS
+SpeechRecognition
+pynput
+pyserial
+python-dotenv
+duckduckgo-search
